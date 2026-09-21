@@ -788,10 +788,15 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
       auto callResult = builder.send();
 
-      // RemotePromise lets us consume its pipeline and promise portions independently; we consume
-      // the promise here and the pipeline below, both via kj::mv().
+      // TODO(soon): switch to https://github.com/capnproto/capnproto/pull/2833/ approach
+      // once merged.
+      using CallResults = rpc::JsRpcTarget::CallResults;
+      using ResponsePromise = kj::Promise<capnp::Response<CallResults>>;
+      auto& promisePart = static_cast<ResponsePromise&>(callResult);
+      auto& pipelinePart = static_cast<CallResults::Pipeline&>(callResult);
+
       kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> resultPromise =
-          kj::mv(callResult);
+          kj::mv(promisePart);
       KJ_IF_SOME(tracker, replayMemoryTracker) {
         resultPromise = resultPromise.attach(
             kj::defer([tracker = kj::addRef(*tracker)]() mutable { tracker->release(); }));
@@ -854,7 +859,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       return {
         .promise = jsg::JsPromise(js.wrapSimplePromise(kj::mv(jsPromise))),
         .weakRef = kj::mv(weakRef),
-        .pipeline = kj::mv(callResult),
+        .pipeline = kj::mv(pipelinePart),
         .originatingCall = kj::mv(originatingCall),
         .actorTargetRetryability = pipelineActorTargetRetryability,
         .replayMemoryTracker = kj::mv(promiseReplayMemoryTracker),
