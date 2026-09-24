@@ -106,6 +106,62 @@ function promiseResolvedWith(value: unknown): Promise<void> {
   return promise;
 }
 
+interface TransformerAlgorithms<I> {
+  transform: ((chunk: I) => Promise<void>) | undefined;
+  flush: (() => Promise<void>) | undefined;
+  cancel: ((reason: unknown) => Promise<void>) | undefined;
+}
+
+// SetUpTransformStreamDefaultControllerFromTransformer's algorithms. Built
+// outside the TransformStream constructor so that `transformer` is captured
+// only by these closures, not by the constructor's shared context (which
+// every closure the constructor creates keeps alive): once ClearAlgorithms
+// drops them, the transformer is collectable.
+function makeTransformerAlgorithms<I, O>(
+  transformer: Transformer<I, O>,
+  controller: TransformStreamDefaultController<I, O>,
+  transformFn: Transformer<I, O>['transform'],
+  flushFn: Transformer<I, O>['flush'],
+  cancelFn: Transformer<I, O>['cancel']
+): TransformerAlgorithms<I> {
+  let transform: TransformerAlgorithms<I>['transform'];
+  if (transformFn !== undefined) {
+    const callTransform = uncurryThis(transformFn);
+    transform = (chunk: I) => {
+      try {
+        return PromiseResolve(
+          callTransform(transformer, chunk, controller)
+        ) as Promise<void>;
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
+    };
+  }
+  let flush: TransformerAlgorithms<I>['flush'];
+  if (flushFn !== undefined) {
+    const callFlush = uncurryThis(flushFn);
+    flush = () => {
+      try {
+        return promiseResolvedWith(callFlush(transformer, controller));
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
+    };
+  }
+  let cancel: TransformerAlgorithms<I>['cancel'];
+  if (cancelFn !== undefined) {
+    const callCancel = uncurryThis(cancelFn);
+    cancel = (reason: unknown) => {
+      try {
+        return promiseResolvedWith(callCancel(transformer, reason));
+      } catch (e) {
+        return PromiseReject(e) as Promise<void>;
+      }
+    };
+  }
+  return { transform, flush, cancel };
+}
+
 // ---------------------------------------------------------------------------
 
 let transformStreamDefaultControllerInit: <I, O>(
@@ -203,10 +259,11 @@ class TransformStream<I = unknown, O = unknown> {
   // sink transforms the first chunk.
   #backpressure: boolean = true;
   #backpressureChange: PromiseWithResolversType<void>;
-  // The transformer's cancel and flush algorithms (undefined when the
-  // transformer has none, or once cleared), and the spec's
+  // The transformer's algorithms (undefined when the transformer has
+  // none, or once cleared; see makeTransformerAlgorithms), and the spec's
   // [[finishPromise]]: whichever of close, abort and cancel runs first
   // settles it, and the others return it.
+  #transformAlgorithm: ((chunk: I) => Promise<void>) | undefined;
   #cancelAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
   #flushAlgorithm: (() => Promise<void>) | undefined;
   #finishPromise: Promise<void> | undefined;
@@ -297,6 +354,7 @@ class TransformStream<I = unknown, O = unknown> {
 
   // Spec: TransformStreamDefaultControllerClearAlgorithms.
   #clearAlgorithms(): void {
+    this.#transformAlgorithm = undefined;
     this.#cancelAlgorithm = undefined;
     this.#flushAlgorithm = undefined;
   }
@@ -577,48 +635,27 @@ class TransformStream<I = unknown, O = unknown> {
       transformStreamDefaultControllerInit(controller, this);
       this.#controller = controller;
 
-      let transformAlgorithm: (chunk: I) => Promise<void>;
-      if (transformFn === undefined) {
-        transformAlgorithm = (chunk: I) => {
+      const algorithms = makeTransformerAlgorithms(
+        transformer,
+        controller,
+        transformFn,
+        flushFn,
+        cancelFn
+      );
+      // No transform hook: enqueue the chunk unchanged (spec step 2's
+      // default transformAlgorithm).
+      this.#transformAlgorithm =
+        algorithms.transform ??
+        ((chunk: I) => {
           try {
             transformStreamEnqueue(this, chunk as unknown as O);
             return PromiseResolve() as Promise<void>;
           } catch (e) {
             return PromiseReject(e) as Promise<void>;
           }
-        };
-      } else {
-        const callTransform = uncurryThis(transformFn);
-        transformAlgorithm = (chunk: I) => {
-          try {
-            return PromiseResolve(
-              callTransform(transformer, chunk, controller)
-            ) as Promise<void>;
-          } catch (e) {
-            return PromiseReject(e) as Promise<void>;
-          }
-        };
-      }
-      if (cancelFn !== undefined) {
-        const callCancel = uncurryThis(cancelFn);
-        this.#cancelAlgorithm = (reason: unknown) => {
-          try {
-            return promiseResolvedWith(callCancel(transformer, reason));
-          } catch (e) {
-            return PromiseReject(e) as Promise<void>;
-          }
-        };
-      }
-      if (flushFn !== undefined) {
-        const callFlush = uncurryThis(flushFn);
-        this.#flushAlgorithm = () => {
-          try {
-            return promiseResolvedWith(callFlush(transformer, controller));
-          } catch (e) {
-            return PromiseReject(e) as Promise<void>;
-          }
-        };
-      }
+        });
+      this.#flushAlgorithm = algorithms.flush;
+      this.#cancelAlgorithm = algorithms.cancel;
 
       const sinkWrite = async (chunk: I): Promise<void> => {
         if (this.#backpressure) {
@@ -628,6 +665,12 @@ class TransformStream<I = unknown, O = unknown> {
             throw writableInternals.getStoredError(this.#writable);
           }
         }
+        // Cleared algorithms with the writable still writable: a write that
+        // reached the sink after readable.cancel() cleared them and before
+        // the cancel settles and errors the writable. The spec leaves this
+        // undefined; like Node, the chunk is dropped and the write fulfills.
+        const transformAlgorithm = this.#transformAlgorithm;
+        if (transformAlgorithm === undefined) return;
         // Spec TransformStreamDefaultControllerPerformTransform: a
         // rejection from the transform algorithm errors BOTH sides
         // (TransformStreamError), then rethrows to reject the write.

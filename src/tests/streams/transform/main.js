@@ -86,7 +86,7 @@ export {
   detachWhileQueuedObservedByReader,
 } from 'buffer-lifecycle';
 
-export { transformStreamGc } from 'gc';
+export { transformStreamGc, transformerCollectedAfterFinish } from 'gc';
 
 export {
   drainingReaderThroughTransform,
