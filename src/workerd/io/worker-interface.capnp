@@ -531,7 +531,6 @@ enum SerializationTag {
 
   blob @15;
   # A Blob, serialized as its MIME type followed by its raw bytes.
-
   socket @16;
   # A transferred Socket. Serialized as socket metadata (see External.socket) followed by its
   # readable and writable streams, which are emitted as separate readableStream/writableStream
@@ -541,6 +540,9 @@ enum SerializationTag {
   # A "wrapped binding": an application-level object (e.g. a D1Database) implemented in TypeScript
   # inside the runtime that wraps a single inner service stub. Serializes as the inner stub's
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
+  durableObjectSnapshot @18;
+  # An opaque snapshot handle. JS code can hold and pass this over RPC but cannot inspect or
+  # call it. Used for cross-DO fork snapshot capabilities.
 }
 
 enum StreamEncoding {
@@ -669,6 +671,12 @@ struct JsValue {
         # Whether the socket allows the read and write sides to close independently. When false, the
         # runtime auto-closes the write side once the read side reaches EOF, so this must be carried
         # across transfer to preserve the origin socket's half-open semantics.
+      }
+
+      durableObjectSnapshot :group {
+        # An opaque snapshot handle for cross-DO fork. JS code can hold and pass this over RPC
+        # but cannot inspect or call it. Using a group so we can add metadata fields later.
+        capability @22 :Capability;
       }
 
       # TODO(soon): WebSocket, Request, Response
