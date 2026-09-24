@@ -9,6 +9,7 @@
 
 #include <workerd/api/actor.h>
 #include <workerd/api/container.h>
+#include <workerd/api/snapshot.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -268,6 +269,13 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // `bookmark`.
   kj::Promise<void> waitForBookmark(kj::String bookmark);
 
+  // Capture this Durable Object's storage at `bookmark`, or at its current position when omitted.
+  // The returned handle is opaque to JavaScript and can only be transferred over RPC.
+  jsg::Promise<jsg::Ref<DurableObjectSnapshot>> snapshot(
+      jsg::Lock& js, jsg::Optional<kj::String> bookmark);
+
+  kj::Promise<kj::String> onNextSessionRestore(jsg::Ref<DurableObjectSnapshot> snapshot);
+
   // Arrange to create replicas for this Durable Object.
   //
   // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
@@ -314,6 +322,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(waitForBookmark);
+      JSG_METHOD(snapshot);
       JSG_READONLY_INSTANCE_PROPERTY(primary, getPrimary);
     }
 
@@ -721,6 +730,9 @@ class DurableObjectState: public jsg::Object {
   // idempotent.
   jsg::Promise<void> configureReadReplication(jsg::Lock& js, ReadReplicationOptions options);
 
+  using RestoreTarget = kj::OneOf<jsg::Ref<DurableObjectSnapshot>, kj::String>;
+  kj::Promise<kj::String> onNextSessionRestore(RestoreTarget target);
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     if (flags.getEnableCtxExports()) {
@@ -740,6 +752,7 @@ class DurableObjectState: public jsg::Object {
 
     if (flags.getWorkerdExperimental()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(primaryStub, getPrimaryStub);
+      JSG_METHOD(onNextSessionRestore);
     }
 
     JSG_METHOD(blockConcurrencyWhile);

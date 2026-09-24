@@ -7,6 +7,7 @@
 #include "actor.h"
 #include "export-loopback.h"
 #include "restore.h"
+#include "snapshot.h"
 #include "sql.h"
 #include "sync-kv.h"
 #include "util.h"
@@ -903,6 +904,28 @@ kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
       .attach(kj::mv(traceContext));
 }
 
+jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
+    jsg::Lock& js, jsg::Optional<kj::String> bookmark) {
+  kj::Maybe<kj::String> selectedBookmark;
+  KJ_IF_SOME(b, bookmark) {
+    selectedBookmark = kj::mv(b);
+  }
+
+  auto& context = IoContext::current();
+  auto traceContext = context.makeUserTraceSpan("durable_object_storage_snapshot"_kjc);
+  auto bookmarkSnapshot = cache->captureBookmarkSnapshot(
+      kj::mv(selectedBookmark), traceContext.getInternalSpanParent());
+  return context.awaitIo(js, kj::mv(bookmarkSnapshot).attach(kj::mv(traceContext)),
+      [](jsg::Lock& js, capnp::Capability::Client bookmarkSnapshot) {
+    return js.alloc<DurableObjectSnapshot>(kj::mv(bookmarkSnapshot));
+  });
+}
+
+kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(
+    jsg::Ref<DurableObjectSnapshot> snapshot) {
+  return cache->onNextSessionRestore(snapshot->getClient());
+}
+
 void DurableObjectStorage::ensureReplicas() {
   if (maybePrimary != kj::none) {
     KJ_FAIL_ASSERT("Replica Durable Objects cannot call ensureReplicas().");
@@ -1171,6 +1194,20 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
       facetManager(facetManager.map(
           [](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })),
       version(kj::mv(version)) {}
+
+kj::Promise<kj::String> DurableObjectState::onNextSessionRestore(RestoreTarget target) {
+  auto& actorStorage =
+      JSG_REQUIRE_NONNULL(storage, Error, "This Durable Object does not have persistent storage.");
+  KJ_SWITCH_ONEOF(target) {
+    KJ_CASE_ONEOF(snapshot, jsg::Ref<DurableObjectSnapshot>) {
+      return actorStorage->onNextSessionRestore(kj::mv(snapshot));
+    }
+    KJ_CASE_ONEOF(bookmark, kj::String) {
+      return actorStorage->onNextSessionRestoreBookmark(kj::mv(bookmark));
+    }
+  }
+  KJ_UNREACHABLE;
+}
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));

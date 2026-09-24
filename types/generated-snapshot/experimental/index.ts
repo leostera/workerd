@@ -713,6 +713,7 @@ export interface DurableObjectState<Props = unknown> {
   facets: DurableObjectFacets;
   version?: DurableObjectStateVersion;
   readonly primaryStub?: DurableObjectStub;
+  onNextSessionRestore(target: DurableObjectSnapshot | string): Promise<string>;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
@@ -799,6 +800,7 @@ export interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  snapshot(bookmark?: string): Promise<DurableObjectSnapshot>;
   /** @deprecated Use `ctx.primaryStub` instead. */
   readonly primary?: DurableObjectStub;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
@@ -2304,6 +2306,7 @@ export type ServiceBindingQueueMessage<Body = unknown> = {
       serializedBody: ArrayBuffer | ArrayBufferView;
     }
 );
+export interface DurableObjectSnapshot {}
 export interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;

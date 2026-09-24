@@ -9,6 +9,7 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/util/strong-bool.h>
 
+#include <capnp/capability.h>
 #include <kj/async.h>
 #include <kj/debug.h>
 #include <kj/list.h>
@@ -311,6 +312,25 @@ class ActorCacheInterface: public ActorCacheOps {
   virtual kj::Promise<void> waitForBookmark(kj::StringPtr bookmark, SpanParent parentSpan) {
     JSG_FAIL_REQUIRE(
         Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
+  }
+
+  // Capture a bookmark snapshot of this object's storage as of `bookmark`, or the current position
+  // when it is omitted, returning a capnp capability that opaquely represents it. The capability is
+  // minted by the back-end and is only meaningful to that back-end; the caller forwards it (via the
+  // JS `DurableObjectSnapshot` handle) without interpreting it. Back-ends that support cross-DO fork
+  // override this; the default throws.
+  virtual kj::Promise<capnp::Capability::Client> captureBookmarkSnapshot(
+      kj::Maybe<kj::String> bookmark, SpanParent parentSpan) {
+    JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not implement snapshots.");
+  }
+
+  // Arrange that on this object's next session it restores its storage from the given snapshot
+  // capability (previously produced by another object's `snapshot()`). The capability is opaque
+  // at this layer; the back-end implementation is responsible for narrowing it to the concrete
+  // snapshot interface it expects and rejecting anything else. Back-ends that support cross-DO
+  // fork override this; the default throws.
+  virtual kj::Promise<kj::String> onNextSessionRestore(capnp::Capability::Client bookmarkSnapshot) {
+    JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not implement snapshots.");
   }
 
   virtual void ensureReplicas() {
