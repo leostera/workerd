@@ -5967,6 +5967,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // extracted beforehand.
   auto abortIsolateCallback = kj::mv(def.abortIsolateCallback);
   auto accessBlobHeaderName = kj::mv(def.accessBlobHeaderName);
+  auto containerEngineConf = def.containerEngineConf;
+  bool isDynamic = def.isDynamic;
+  auto& localActorConfigs = def.localActorConfigs;
 
   auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
@@ -6131,12 +6134,12 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
   kj::Maybe<kj::String> dockerPath = kj::none;
   kj::Maybe<kj::String> containerEgressInterceptorImage = kj::none;
-  switch (def.containerEngineConf.which()) {
+  switch (containerEngineConf.which()) {
     case config::Worker::ContainerEngine::NONE:
       // No container engine configured
       break;
     case config::Worker::ContainerEngine::LOCAL_DOCKER: {
-      auto dockerConf = def.containerEngineConf.getLocalDocker();
+      auto dockerConf = containerEngineConf.getLocalDocker();
       dockerPath = kj::str(dockerConf.getSocketPath());
       if (dockerConf.hasContainerEgressInterceptorImage()) {
         containerEgressInterceptorImage = kj::str(dockerConf.getContainerEgressInterceptorImage());
@@ -6146,16 +6149,16 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   kj::Maybe<kj::StringPtr> serviceName;
-  if (!def.isDynamic) serviceName = name;
+  if (!isDynamic) serviceName = name;
 
   auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
       globalContext->threadContext, monotonicClock, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
       KJ_BIND_METHOD(*this, abortAllActors), KJ_BIND_METHOD(*this, deleteAllActors),
-      kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage), def.isDynamic,
+      kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage), isDynamic,
       kj::mv(abortIsolateCallback), kj::mv(accessBlobHeaderName));
-  result->initActorNamespaces(def.localActorConfigs, actorNamespacesByUniqueKey, network);
+  result->initActorNamespaces(localActorConfigs, actorNamespacesByUniqueKey, network);
   co_return result;
 }
 
