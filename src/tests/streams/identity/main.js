@@ -67,6 +67,8 @@ export {
 export {
   supportsByobReader,
   partialFillAcrossReads,
+  byobReadSpansQueuedWrites,
+  byobReadSpanningBoundaries,
   byobViewLyingAboutLength,
   byobViewLyingAfterEnqueue,
   byobReadCallValidation,
@@ -80,6 +82,7 @@ export {
   defaultHighWaterMarkAccounting,
   explicitHighWaterMarkIsInitialDesiredSize,
   desiredSizeTracksBytes,
+  partialByobReadKeepsWriteCounted,
   stringWriteDesiredSizeAccounting,
   readyReflectsBackpressure,
 } from 'backpressure';
@@ -143,6 +146,14 @@ export {
 } from 'tee-backpressure';
 
 export {
+  teeByobBranchesReadDifferentSizes,
+  teeLaggingBranchHoldsWriterDesiredSize,
+  teeCancelSlowerBranchSettlesWrites,
+  teeMixedByobAndDefaultReaders,
+  nestedTeeByobLeavesReadDifferentSizes,
+} from 'tee-byob';
+
+export {
   teeOfTeeBranchDeliversToAllLeaves,
   nestedTeeSingleLeafReadDoesNotHang,
 } from 'tee-nested';
@@ -181,6 +192,7 @@ export { releaseLockRejectsClosedPromises } from 'lock-release';
 
 export {
   readAtLeastWaitsForMinimum,
+  readAtLeastSpanningWritesSettlesEach,
   readAtLeastValidation,
   readAtLeastUnavailableOnDefaultReader,
 } from 'read-at-least';
