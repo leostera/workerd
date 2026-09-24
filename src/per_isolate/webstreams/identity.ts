@@ -20,7 +20,8 @@
 //     processChunk copies inside write() for exactly these hazards).
 //   - Zero-length writes are accepted as NO-OPS: the write resolves
 //     immediately without touching the readable queue (no zero-length
-//     chunk enqueued, no backpressure interaction, no pull).
+//     chunk enqueued, no backpressure interaction, no pull). A view whose
+//     buffer is detached or out of bounds is zero-length, as in C++.
 //
 // See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
 // and FixedLengthStream specification.
@@ -67,14 +68,12 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { ViewExtentHelpers } from './view-extent';
 
 const {
   ArrayBuffer,
   ArrayBufferPrototypeByteLengthGet,
   BigInt,
-  DataViewPrototypeGetBuffer,
-  DataViewPrototypeGetByteLength,
-  DataViewPrototypeGetByteOffset,
   Number,
   ObjectDefineProperties,
   ObjectFreeze,
@@ -86,10 +85,7 @@ const {
   TextEncoder,
   TextEncoderEncode,
   TypeError,
-  TypedArrayPrototypeGetBuffer,
   TypedArrayPrototypeGetByteLength,
-  TypedArrayPrototypeGetByteOffset,
-  TypedArrayPrototypeGetSymbolToStringTag,
   TypedArrayPrototypeSet,
   Uint8Array,
   uncurryThis,
@@ -112,6 +108,8 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+const { viewByteExtent, viewByteLength } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
@@ -176,28 +174,13 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
     return copy;
   }
   if (isArrayBufferView(chunk)) {
-    const isDataView =
-      TypedArrayPrototypeGetSymbolToStringTag(chunk) === undefined;
-    const byteOffset = (
-      isDataView
-        ? DataViewPrototypeGetByteOffset(chunk)
-        : TypedArrayPrototypeGetByteOffset(chunk)
-    ) as number;
-    const byteLength = (
-      isDataView
-        ? DataViewPrototypeGetByteLength(chunk)
-        : TypedArrayPrototypeGetByteLength(chunk)
-    ) as number;
+    // A detached or out-of-bounds view is empty (see view-extent.ts).
+    const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
     if (byteLength === 0) return undefined;
-    const buffer = (
-      isDataView
-        ? DataViewPrototypeGetBuffer(chunk)
-        : TypedArrayPrototypeGetBuffer(chunk)
-    ) as ArrayBuffer;
     const copy = new Uint8Array(new ArrayBuffer(byteLength));
     TypedArrayPrototypeSet(
       copy,
-      new Uint8Array(buffer, byteOffset, byteLength)
+      new Uint8Array(buffer as ArrayBuffer, byteOffset, byteLength)
     );
     return copy;
   }
@@ -242,13 +225,7 @@ function byteSize(chunk: unknown): number {
   // byteSize runs only on chunks validateAndCopyChunk has already
   // accepted (sizeAndSnapshot validates before sizing), so anything that
   // is not a string or (Shared)ArrayBuffer is an ArrayBufferView.
-  const isDataView =
-    TypedArrayPrototypeGetSymbolToStringTag(chunk) === undefined;
-  return (
-    isDataView
-      ? DataViewPrototypeGetByteLength(chunk)
-      : TypedArrayPrototypeGetByteLength(chunk)
-  ) as number;
+  return viewByteLength(chunk as ArrayBufferView);
 }
 
 let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
