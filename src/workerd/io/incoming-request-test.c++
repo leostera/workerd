@@ -245,7 +245,7 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
   // not cleared unless drain() moves out of it. So `first` being null afterwards proves that
   // drain() took ownership on the early-return path.
   first->drain(waitUntilTasks, kj::mv(first));
-  KJ_EXPECT(first.get() == nullptr,
+  KJ_EXPECT(first.get() == nullptr,  // NOLINT(workerd-use-after-move)
       "drain() must consume `self` even when a newer request has already taken over");
 
   // The early-return path schedules no background work.
